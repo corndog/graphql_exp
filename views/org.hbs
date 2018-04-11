@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		
+	</head>
+	<body>
+		<h1>{{ org.login }}</h1>
+		<h3>id: {{ org.id }}
+		<div id="main">
+		 Wait for it
+		</div>
+		<ul>
+		{{#each users }}
+			<li> {{ this.login }}</li>
+		{{/each}}
+		</ul>
+	<script src="app.js"></script>
+	</body>
+</html>
