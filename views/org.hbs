@@ -10,8 +10,8 @@
 		 Wait for it
 		</div>
 		<ul>
-		{{#each users }}
-			<li> {{ this.login }}</li>
+		{{#each repos }}
+			<li>name: {{ this.name }} stars: {{this.stars}} forks: {{this.forks}}</li>
 		{{/each}}
 		</ul>
 	<script src="app.js"></script>

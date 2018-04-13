@@ -8,22 +8,12 @@ const {render, json, redirect, status} = server.reply;
 const rootUrl = 'https://api.github.com';
 const opts = {
 	'headers': {
-		'Authorization': 'bearer 72bfe56c54917929960dac5d6b2056b5eaf8ce6c',
+		'Authorization': 'bearer xxx',
 		'content-type': 'application/json'
 	}
 };
 
-let db; // argh
-
-// set up database, 
-// const db = new sqlite.Database(':memory:', err => {
-// 	if (err) {
-// 		return console.log(err.message);
-// 	}
-// 	console.log("connected to DB");
-// });
-
-// INSERT OR IGNORE INTO bookmarks(users_id, lessoninfo_id) VALUES(123, 456)
+let db; // initialized at app startup
 
 // create tables for orgs, repos, contributors (public and otherwise...)
 const initDb = () => db.transaction(db => {
@@ -37,21 +27,23 @@ const initDb = () => db.transaction(db => {
 });
 
 
-const insertOrgPublicMember = data => {
+const insertOrgPublicMembers = async (org_id, members) => {
 	//  (org_id, user_id)
-	let stmt = db.prepare('INSERT INTO org_public_members (org_id, user_id) VALUES (?, ?)');
-	data.each((org_id, user_id) => stmt.run(org_id, user_id));
-	stmt.finalize();
+	let stmt = await db.prepare('INSERT OR IGNORE INTO org_public_members (org_id, user_id) VALUES (?, ?)');
+	return db.transaction(db => 
+		Promise.all(members.map(member => stmt.run(org_id, member.user_id)))
+	);
 };
 
-const insertRepoContributor = (repo_id, user_id, contributions) => {
-	let stmt = db.prepare('INSERT INTO repo_contributors (repo_id, user_id, contributions) VALUES (?, ?, ?)');
-	stmt.run(repo_id, user_id, contributions);
-	stmt.finalize();
+const insertRepoContributors = async repoContributors => {
+	// (repo_id, user_id, contributions) 
+	let stmt = await db.prepare('INSERT INTO repo_contributors (repo_id, user_id, contributions) VALUES (?, ?, ?)');
+	return db.transaction(db =>
+		Promise.all(repoContibutors.map(rc => stmt.run(rc.repo_id, rc.user_id, rc.contributions)))
+	);
 };
 
 const insertOrg = async (id, login) => {
-	console.log("INSERT ORG: " + login);
 	let stmt = await db.prepare('INSERT INTO orgs (id, login) VALUES (?, ?)');
 	return stmt.run(id, login);
 };
@@ -59,19 +51,26 @@ const insertOrg = async (id, login) => {
 const selectOrg = async id => {
 	let query = `SELECT id, login FROM orgs WHERE id = ?`;
 	let row = await db.get(query, [id]);
-	console.log("DB ROW : " + row.login);
 	return row ? {id: row.id, login: row.login} : {};
 };
 
-const insertRepos = repos => {
-	// (id, name, stars, forks, org_id)
-	let stmt = db.prepare('INSERT INTO repos (id, name, stars, forks, org_id)');
-	repos.each((id, name, stars, forks, org_id) => stmt.run(id, name, stars, forks, org_id));
-	stmt.finalize();
+const insertRepos = async (org_id, repos) => {
+	// (id, name, stars, forks)
+	let stmt = await db.prepare('INSERT INTO repos (id, name, stars, forks, org_id) VALUES (?, ?, ?, ?, ?)');
+	return db.transaction( db =>
+		Promise.all(repos.map(repo => stmt.run(repo.id, repo.name, repo.stars, repo.forks, org_id)))
+	);
 };
 
+const selectReposForOrg = async org_id => {
+	let stmt = await db.prepare(`SELECT id, name, stars, forks FROM repos WHERE org_id = ?`);
+	let stmt1 = await stmt.bind(org_id);
+	let rows = await stmt1.all();
+	return rows.map(r => {return {id: r.id, name: r.name, stars: r.stars, forks: r.forks}});
+}
+
 const insertUsers = async users => {
-	let stmt = await db.prepare('INSERT INTO users (id, login) VALUES (?,?)');
+	let stmt = await db.prepare('INSERT  OR IGNORE INTO users (id, login) VALUES (?,?)');
 	return db.transaction(db => Promise.all(users.map(user => stmt.run(user.id, user.login))));
 };
 
@@ -79,17 +78,13 @@ const selectUsers = async () => {
 	let stmt = await db.prepare('SELECT * from users');
 	let rows = await stmt.all();
 	return rows.map(r => { return {id: r.id, login: r.login}});
-}
+};
 
 // quick hack, should be in DB
 // {org : {scraping: true, completed: false, max_repos: 200, max_members: 100}}  eg.
 const scrapeStatuses = new Map();
 
-const scrape = org => {
-	scrape_public_members(org);
-	scrape_repos(org);
-	console.log(`scraping ${org}`);
-}
+
 
 // returns [link, data]
 // where link has {next: .., prev: .., last: ..}
@@ -99,7 +94,7 @@ const getPaginatedData = async url => {
 	let link = parseLink(resp.headers.get('Link'));
 	console.log(JSON.stringify(link)); // .next, .prev. , .last..
 	return [link, data];
-}
+};
 
 // const getAllPaginated = async url => {
 // 	let [link, data] = await getPaginatedData(url);
@@ -111,27 +106,37 @@ const getOrg = async org => {
 	let resp = await fetch(url, opts);
 	let data = await resp.json();
 	return {id: data.id, login: data.login};
-}
+};
 
-const getReposForOrg = org => getPaginatedData(`${rootUrl}/orgs/${org}/repos`)
-
-const getPublicMembersForOrg = async publicMembersUrl => {
+const getPublicMembersForOrg = async (org_id, publicMembersUrl) => {
 	console.log("fetching " + publicMembersUrl);
 	let [link, members] = await getPaginatedData(publicMembersUrl);
-	let _ = await insertUsers(members.map(m => {return {id: m.id, login: m.login}}));
+	let _1 = await insertUsers(members.map(m => {return {id: m.id, login: m.login}}));
+	let _2 = insertOrgPublicMembers(org_id, members.map(m => {return {user_id: m.id}}));
 	if (link.next) {
-		return getPublicMembersForOrg(link.next.url);
+		return getPublicMembersForOrg(org_id, link.next.url);
 	}
 	else {
 		console.log("finished loading members for " + publicMembersUrl);
 		return;
 	}
 };
-	
+
+const getReposForOrg = async (org_id, orgReposUrl) => {
+	let [link, repos] = await getPaginatedData(orgReposUrl);
+	let _1 = await insertRepos(org_id, repos.map(r => {return {id: r.id, name: r.name, stars: r.stargazers_count, forks: r.forks_count}}));
+	let repoContributorsUrls = repos.map(r => r.contributors_url); // TODO
+	if (link.next) {
+		return getReposForOrg(org_id, link.next.url);
+	}
+	else {
+		console.log("finished loading repos for " + orgReposUrl);
+	}
+};
 // const getRepoContributors = async contribUrl => {
 // 	let [link, data] = await getPaginatedData(`${rootUrl}/repos/${org}/${repo}/contributors`)
 
-// };
+
 
 
 // TODO handle not found orgs
@@ -141,7 +146,8 @@ const fetchOrg = async ctx => {
 	//console.log("NEXT:\n" + link.next.page + ", " + link.next.url + ", " + link.next.per_page + ", " + link.next.rel);
 	console.log("\ninserting ORG: " + org.id);
 	let _1 = await insertOrg(org.id, org.login);
-	let _2 = await getPublicMembersForOrg(`${rootUrl}/orgs/${org.login}/public_members`);
+	let _2 = await getPublicMembersForOrg(org.id, `${rootUrl}/orgs/${org.login}/public_members`);
+	let _3 = await getReposForOrg(org.id, `${rootUrl}/orgs/${org.login}/repos`);
 	return redirect(`/org/${org.id}`);
 	// return json(repos.map(repo => { return {
 	// 	'name': repo.name,
@@ -152,10 +158,11 @@ const fetchOrg = async ctx => {
 };
 
 const showOrg = async ctx => {
-	let data = await selectOrg(ctx.params.id);
-	let users = await selectUsers();
-	if (data.login)
-		return render('org.hbs', { org: data, users: users });
+	let org = await selectOrg(ctx.params.id);
+	//let users = await selectUsers();
+	let repos = await selectReposForOrg(org.id);
+	if (org.login)
+		return render('org.hbs', { org: org, repos: repos });
 	else
 		return status(404);
 };
@@ -169,7 +176,7 @@ const run = async () => {
 // finally set up server
 	server({ security: { csrf: false } },[
 		get('/', ctx => render('index.html')),
-		get('/org/:id', showOrg),
+		get('/org/:id', showOrg), // login instead of id?
 		post('/org', fetchOrg),
 		get('/test', ctx => "Helloo!!")
 	]);
