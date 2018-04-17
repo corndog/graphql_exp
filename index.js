@@ -26,6 +26,24 @@ const initDb = () => db.transaction(db => {
 	]);
 });
 
+const selectInternalContributors = async org_id => {
+	let query = `
+		SELECT id, 
+				login, 
+				(SELECT SUM(contributions) 
+				 FROM repo_contributors 
+				 WHERE repo_contributors.user_id = id 
+				 	AND repo_contributors.repo_id IN
+				 	(SELECT repo_id FROM repos WHERE org_id = ?)) as contributions 
+		FROM users 
+		WHERE id IN (SELECT user_id FROM org_public_members WHERE org_id = ?)`
+
+	let stmt = await db.prepare(query); 
+	let stmt1 = await stmt.bind(org_id, org_id);
+	let rows = await stmt.all();
+	return rows.map(r => {return {user_id: r.id, name: r.login, contributions: r.contributions}});
+};
+
 
 const insertOrgPublicMembers = async (org_id, members) => {
 	//  (org_id, user_id)
@@ -162,6 +180,12 @@ const getReposForOrg = async (org_id, orgReposUrl) => {
 // {org : {scraping: true, completed: false, max_repos: 200, max_members: 100}}  eg.
 const scrapeStatuses = new Map();
 
+const returnData = async org_id => {
+	let repos = await selectReposForOrg(org_id);
+	let internalContributors = await selectInternalContributors(org_id);
+	return {repos: repos, internalContributors: internalContributors};
+};
+
 // triggered from browser after initial load of org
 const fetchOrg = async ctx => {
 	let org_id = ctx.params.id; // Lower case??
@@ -171,8 +195,8 @@ const fetchOrg = async ctx => {
 	let _3 = await getReposForOrg(org.id, `${rootUrl}/orgs/${org.login}/repos`);
 	console.log("FINISHED LOADING DATA FOR " + org.login);
 	scrapeStatuses.set(org.login, true);
-	let repos = await selectReposForOrg(org.id);
-	return json(repos);
+	let data = await returnData(org.id);
+	return json(data);
 };
 
 // first we look for data, if it exists, return it
@@ -194,9 +218,8 @@ const showOrg = async ctx => {
 	}
 	else { // should have the data
 		let org = await selectOrgByName(org_name); // could tighten this up to one query
-		//let users = await selectUsers();
-		let repos = await selectReposForOrg(org.id);
-		return json(repos);
+		let data = await returnData(org.id);
+		return json(data);
 	}
 };
 

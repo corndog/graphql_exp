@@ -1,29 +1,35 @@
+// hacked together somewhat hurriedly  :)
 let org_id; // active org id
-let data = []; // list of things to display
+let repos = []; // list of things to display
+let internal_contributors = [];
+let active_data = 'repos'; // default
 
 const clear = () => {
 	document.getElementById('message').innerText = '';
 	document.getElementById('data_table').innerHTML = '';
+	document.getElementById('radio_buttons').style.display = 'none'; // FIX THIS MESSY LOGIC!!!
 };
 
 
-const sortDataBy = field => {
-	data.sort((a, b) => { a[field] - b[field]
+const sortDataBy = (activeData, field) => {
+	activeData.sort((a, b) => { 
 		let av = a[field];
 		let bv = b[field];
 		if (typeof av == "string") {
-			return av.localeCompare(bv);
+			return bv.localeCompare(av);
 		}
 		else {
-			return av - bv; // numbers
+			return bv - av; // numbers
 		}
 
 	});
 };
 
-const showData = sortField => {
+const showData = (sortField) => {
+	let data = active_data == 'repos' ? repos : internal_contributors;
 	document.getElementById('message').innerText = '';
-	sortDataBy(sortField);
+	document.getElementById('radio_buttons').style.display = ''; // FIX THIS MESSY LOGIC!!!
+	sortDataBy(data, sortField);
 	let keys = Object.keys(data[0]);
 	let tds = row => keys.map(k => `<td>${row[k]}</td>`).join('')
 	let tr = row => `<tr>${tds(row)}</tr>`
@@ -37,7 +43,8 @@ const waitForData = async () => {
 	//console.log('wait for data');
 	let resp = await fetch(`/org/${org_id}`, {'method' : 'POST'}); // might take a while
 	let jsd = await resp.json();
-	data = jsd;
+	repos = jsd.repos;
+	internal_contributors = jsd.internalContributors;
 	showData('name');
 };
 
@@ -54,7 +61,8 @@ const onSubmit = async event => {
 	let resp = await fetch(`/org/${org_name}`);
 	let jsd = await resp.json();
 	if (jsd.message == undefined) { // should be good to go
-		data = jsd;
+		repos = jsd.repos;
+		internal_contributors = jsd.internalContributors;
 		showData('name');
 	}
 	else if (jsd.message) {
@@ -75,8 +83,19 @@ const clickHeader = async event => {
 	}
 };
 
+// click a radio button
+const toggleTable = (event) => {
+	let selectedData = document.querySelector('input[name="view_type"]:checked').value;
+	console.log("SELELCTED " + selectedData);
+	active_data = selectedData;
+	showData('name'); 
+};
+
 // attach event handlers
 document.getElementById('org_form').addEventListener('submit', onSubmit, false);
 
 document.getElementById('data_table').addEventListener('click', clickHeader, false);
 
+let radios = document.querySelectorAll('input[name="view_type"]');
+
+Array.prototype.forEach.call(radios, function(radio) { radio.addEventListener('change', toggleTable, false)});
