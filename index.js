@@ -92,10 +92,7 @@ const selectUsers = async () => {
 const getPaginatedData = async url => {
 	let resp = await fetch(url, opts);
 	let data = await resp.json();
-	console.log("data: " + data);
 	let link = parseLink(resp.headers.get('Link')); // can be null, no link in header
-	//console.log("url" + url);
-	//console.log("data? " + data);
 	return [link, data];
 };
 
