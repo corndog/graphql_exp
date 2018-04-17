@@ -15,6 +15,8 @@ const opts = {
 
 let db; // initialized at app startup
 
+// needs indexes, foreign keys etc
+
 // create tables for orgs, repos, contributors (public and otherwise...)
 const initDb = () => db.transaction(db => {
 	return Promise.all([
@@ -87,12 +89,18 @@ const insertRepos = async (org_id, repos) => {
 };
 
 const selectReposForOrg = async org_id => {
-	console.log("select repos for org " + org_id);
 	let stmt = await db.prepare('SELECT id, name, stars, forks, (SELECT SUM(contributions) FROM repo_contributors WHERE repo_contributors.repo_id = repos.id) AS contributions FROM repos WHERE org_id = ?');
 	let stmt1 = await stmt.bind(org_id);
 	let rows = await stmt1.all();
 	return rows.map(r => {return {id: r.id, name: r.name, stars: r.stars, forks: r.forks, contributions: r.contributions}});
-}
+};
+
+const selectRepoCount = async org_id => {
+	let query = 'SELECT COUNT(*) AS rcount FROM repos WHERE org_id = ?';
+	let row = await db.get(query, [org_id]);
+	console.log(JSON.stringify(row));
+	return row ? {count: row.rcount} : {};
+};
 
 const insertUsers = async users => {
 	let stmt = await db.prepare('INSERT  OR IGNORE INTO users (id, login) VALUES (?,?)');
@@ -118,8 +126,13 @@ const getPaginatedData = async url => {
 const getOrg = async org => {
 	let url = `${rootUrl}/orgs/${org}`;
 	let resp = await fetch(url, opts);
-	let data = await resp.json();
-	return {id: data.id, login: data.login};
+	if (resp.ok) {
+		let data = await resp.json();
+		return [resp.status, {id: data.id, login: data.login}];
+	}
+	else {
+		return [resp.status, null]; // hmm
+	}
 };
 
 const getPublicMembersForOrg = async (org_id, publicMembersUrl) => {
@@ -183,20 +196,21 @@ const scrapeStatuses = new Map();
 const returnData = async org_id => {
 	let repos = await selectReposForOrg(org_id);
 	let internalContributors = await selectInternalContributors(org_id);
-	return {repos: repos, internalContributors: internalContributors};
+	return {repos: repos, internalContributors: internalContributors, done: true};
 };
 
 // triggered from browser after initial load of org
-const fetchOrg = async ctx => {
-	let org_id = ctx.params.id; // Lower case??
+const fetchOrg = async org_id => {
+	//let org_id = ctx.params.id; // Lower case??
 	let org = await selectOrgById(org_id); 
 	console.log("fetch more data for " + org.id + ", " + org.login)
 	let _1 = await getPublicMembersForOrg(org.id, `${rootUrl}/orgs/${org.login}/public_members`);
-	let _3 = await getReposForOrg(org.id, `${rootUrl}/orgs/${org.login}/repos`);
+	let _2 = await getReposForOrg(org.id, `${rootUrl}/orgs/${org.login}/repos`);
 	console.log("FINISHED LOADING DATA FOR " + org.login);
 	scrapeStatuses.set(org.login, true);
-	let data = await returnData(org.id);
-	return json(data);
+	//let data = await returnData(org.id);
+	//return json(data);
+	return; // 
 };
 
 // first we look for data, if it exists, return it
@@ -207,14 +221,21 @@ const showOrg = async ctx => {
 	if (scrapeStatuses.get(org_name) == undefined) {
 		scrapeStatuses.set(org_name, false); // its there but not finished
 		console.log("fetch org " + org_name);
-		let org = await getOrg(org_name); // await getReposForOrg(ctx.data.org));
-		console.log("\ninserting ORG: " + org.id + ", " + org.login);
-		let _1 = await insertOrg(org.id, org.login);
-		return json({'message': 'loading data', 'org_id': org.id});
+		let [statusCode, org] = await getOrg(org_name);
+		if (statusCode < 300 && org != null) {
+			console.log("\ninserting ORG: " + org.id + ", " + org.login); // don't think we need id now
+			let _1 = await insertOrg(org.id, org.login);
+			fetchOrg(org.id);
+			return json({'message': 'loading data', 'done': false});
+		}
+		else {
+			return status(statusCode);
+		}
 	}
 	else if (! scrapeStatuses.get(org_name)) {
 		let org = await selectOrgByName(org_name);
-		return json({'message': 'loading data', 'org_id': org.id});
+		let repoCount = await selectRepoCount(org.id);
+		return json({'message': `loaded data for ${repoCount.count} repos`, 'done': false});
 	}
 	else { // should have the data
 		let org = await selectOrgByName(org_name); // could tighten this up to one query
@@ -232,9 +253,7 @@ const run = async () => {
 // finally set up server
 	server({ security: { csrf: false } },[
 		get('/', ctx => render('index.html')),
-		get('/org/:name', showOrg), // login instead of id?
-		post('/org/:id', fetchOrg),
-		get('/test', ctx => "Helloo!!")
+		get('/org/:name', showOrg) // just use one endpoint
 	]);
 };
 
