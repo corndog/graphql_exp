@@ -8,7 +8,7 @@ const {render, json, redirect, status} = server.reply;
 const rootUrl = 'https://api.github.com';
 const opts = {
 	'headers': {
-		'Authorization': 'bearer xxx',
+		'Authorization': 'bearer xyz',
 		'content-type': 'application/json'
 	}
 };
@@ -35,11 +35,11 @@ const insertOrgPublicMembers = async (org_id, members) => {
 	);
 };
 
-const insertRepoContributors = async repoContributors => {
+const insertRepoContributors = async (repo_id, contributors) => {
 	// (repo_id, user_id, contributions) 
-	let stmt = await db.prepare('INSERT INTO repo_contributors (repo_id, user_id, contributions) VALUES (?, ?, ?)');
+	let stmt = await db.prepare('INSERT OR IGNORE INTO repo_contributors (repo_id, user_id, contributions) VALUES (?, ?, ?)');
 	return db.transaction(db =>
-		Promise.all(repoContibutors.map(rc => stmt.run(rc.repo_id, rc.user_id, rc.contributions)))
+		Promise.all(contributors.map(rc => stmt.run(repo_id, rc.user_id, rc.contributions)))
 	);
 };
 
@@ -48,7 +48,13 @@ const insertOrg = async (id, login) => {
 	return stmt.run(id, login);
 };
 
-const selectOrg = async id => {
+const selectOrgByName = async name => {
+	let query = `SELECT id, login FROM orgs WHERE login = ?`;
+	let row = await db.get(query, [name]);
+	return row ? {id: row.id, login: row.login} : {};
+};
+
+const selectOrgById = async id => {
 	let query = `SELECT id, login FROM orgs WHERE id = ?`;
 	let row = await db.get(query, [id]);
 	return row ? {id: row.id, login: row.login} : {};
@@ -63,10 +69,11 @@ const insertRepos = async (org_id, repos) => {
 };
 
 const selectReposForOrg = async org_id => {
-	let stmt = await db.prepare(`SELECT id, name, stars, forks FROM repos WHERE org_id = ?`);
+	console.log("select repos for org " + org_id);
+	let stmt = await db.prepare('SELECT id, name, stars, forks, (SELECT SUM(contributions) FROM repo_contributors WHERE repo_contributors.repo_id = repos.id) AS contributions FROM repos WHERE org_id = ?');
 	let stmt1 = await stmt.bind(org_id);
 	let rows = await stmt1.all();
-	return rows.map(r => {return {id: r.id, name: r.name, stars: r.stars, forks: r.forks}});
+	return rows.map(r => {return {id: r.id, name: r.name, stars: r.stars, forks: r.forks, contributions: r.contributions}});
 }
 
 const insertUsers = async users => {
@@ -80,26 +87,17 @@ const selectUsers = async () => {
 	return rows.map(r => { return {id: r.id, login: r.login}});
 };
 
-// quick hack, should be in DB
-// {org : {scraping: true, completed: false, max_repos: 200, max_members: 100}}  eg.
-const scrapeStatuses = new Map();
-
-
-
 // returns [link, data]
 // where link has {next: .., prev: .., last: ..}
 const getPaginatedData = async url => {
 	let resp = await fetch(url, opts);
 	let data = await resp.json();
-	let link = parseLink(resp.headers.get('Link'));
-	console.log(JSON.stringify(link)); // .next, .prev. , .last..
+	let link = parseLink(resp.headers.get('Link')); // can be null, no link in header
+	//console.log("url" + url);
+	//console.log("data? " + data);
 	return [link, data];
 };
 
-// const getAllPaginated = async url => {
-// 	let [link, data] = await getPaginatedData(url);
-
-// }
 
 const getOrg = async org => {
 	let url = `${rootUrl}/orgs/${org}`;
@@ -112,8 +110,8 @@ const getPublicMembersForOrg = async (org_id, publicMembersUrl) => {
 	console.log("fetching " + publicMembersUrl);
 	let [link, members] = await getPaginatedData(publicMembersUrl);
 	let _1 = await insertUsers(members.map(m => {return {id: m.id, login: m.login}}));
-	let _2 = insertOrgPublicMembers(org_id, members.map(m => {return {user_id: m.id}}));
-	if (link.next) {
+	let _2 = await insertOrgPublicMembers(org_id, members.map(m => {return {user_id: m.id}}));
+	if (link && link.next) {
 		return getPublicMembersForOrg(org_id, link.next.url);
 	}
 	else {
@@ -122,49 +120,85 @@ const getPublicMembersForOrg = async (org_id, publicMembersUrl) => {
 	}
 };
 
+const getRepoContributors = async (repo_id, contributors_url) => {
+	//console.log("REPO ID: " + repo_id + ", CONTRIBUTOR URL " + contributors_url);
+	let [link, contributors] = await getPaginatedData(contributors_url);
+	let _1 = await insertUsers(contributors.map(rc=> {return {id: rc.id, login: rc.login}}));
+	let _2 = await insertRepoContributors(repo_id, contributors.map(rc => {return {user_id: rc.id, contributions: rc.contributions}}));
+	if (link && link.next) {
+		return getRepoContributors(repo_id, link.next.url);
+	}
+	else {
+		console.log("finished loading contibutors for repo " + contributors_url);
+		return;
+	}
+};
+
+const getReposContribs = async contribs => {
+	let next = contribs.shift();
+	//console.log("next repo contrib: " + next);
+	let _1 = await getRepoContributors(next.id, next.url);
+	if (contribs.length > 0) {
+		return getReposContribs(contribs);
+	}
+	else {
+		console.log("finished loading contributors for a bunch of repos");
+		return;
+	}
+};
+
 const getReposForOrg = async (org_id, orgReposUrl) => {
 	let [link, repos] = await getPaginatedData(orgReposUrl);
 	let _1 = await insertRepos(org_id, repos.map(r => {return {id: r.id, name: r.name, stars: r.stargazers_count, forks: r.forks_count}}));
-	let repoContributorsUrls = repos.map(r => r.contributors_url); // TODO
-	if (link.next) {
+	// one transaction at a time in sqlite
+	let _2 = await getReposContribs(repos.map(r => {return {id: r.id, url: r.contributors_url}}));
+	if (link && link.next) {
 		return getReposForOrg(org_id, link.next.url);
 	}
 	else {
 		console.log("finished loading repos for " + orgReposUrl);
 	}
 };
-// const getRepoContributors = async contribUrl => {
-// 	let [link, data] = await getPaginatedData(`${rootUrl}/repos/${org}/${repo}/contributors`)
 
+// quick hack, should be in DB
+// {org : {scraping: true, completed: false, max_repos: 200, max_members: 100}}  eg.
+const scrapeStatuses = new Map();
 
-
-
-// TODO handle not found orgs
+// triggered from browser after initial load of org
 const fetchOrg = async ctx => {
-	console.log("fetch org " + ctx.data);
-	let org = await getOrg(ctx.data.org); // await getReposForOrg(ctx.data.org));
-	//console.log("NEXT:\n" + link.next.page + ", " + link.next.url + ", " + link.next.per_page + ", " + link.next.rel);
-	console.log("\ninserting ORG: " + org.id);
-	let _1 = await insertOrg(org.id, org.login);
-	let _2 = await getPublicMembersForOrg(org.id, `${rootUrl}/orgs/${org.login}/public_members`);
+	let org_id = ctx.params.id; // Lower case??
+	let org = await selectOrgById(org_id); 
+	console.log("fetch more data for " + org.id + ", " + org.login)
+	let _1 = await getPublicMembersForOrg(org.id, `${rootUrl}/orgs/${org.login}/public_members`);
 	let _3 = await getReposForOrg(org.id, `${rootUrl}/orgs/${org.login}/repos`);
-	return redirect(`/org/${org.id}`);
-	// return json(repos.map(repo => { return {
-	// 	'name': repo.name,
-	// 	'stars': repo.stargazers_count,
-	// 	'forks': repo.forks_count,
-	// 	'contributors_url': repo.contributors_url
-	// }}));
+	scrapeStatuses.set(org.login, true);
+	let repos = await selectReposForOrg(org.id);
+	return json(repos);
 };
 
+// first we look for data, if it exists, return it
+// if not return message and trigger load, then poll the get.
 const showOrg = async ctx => {
-	let org = await selectOrg(ctx.params.id);
-	//let users = await selectUsers();
-	let repos = await selectReposForOrg(org.id);
-	if (org.login)
-		return render('org.hbs', { org: org, repos: repos });
-	else
-		return status(404);
+	console.log("Looking for ORG " + ctx.params.name);
+	let org_name = ctx.params.name;
+	if (scrapeStatuses.get(org_name) == undefined) {
+		scrapeStatuses.set(org_name, false); // its there but not finished
+		console.log("fetch org " + org_name);
+		let org = await getOrg(org_name); // await getReposForOrg(ctx.data.org));
+		console.log("\ninserting ORG: " + org.id + ", " + org.login);
+		let _1 = await insertOrg(org.id, org.login);
+		return json({'message': 'loading data', org_id: org.id});
+	}
+	else if (! scrapeStatuses.get(org_name)) {
+		let org = await selectOrgByName(org_name);
+		return json({message: 'loading data', org_id: org.id});
+	}
+	else { // should have the data
+		let org = await selectOrgByName(org_name); // could tighten this up to one query
+		//let users = await selectUsers();
+		let repos = await selectReposForOrg(org.id);
+		return json(repos);
+	}
 };
 
 const run = async () => {
@@ -176,8 +210,8 @@ const run = async () => {
 // finally set up server
 	server({ security: { csrf: false } },[
 		get('/', ctx => render('index.html')),
-		get('/org/:id', showOrg), // login instead of id?
-		post('/org', fetchOrg),
+		get('/org/:name', showOrg), // login instead of id?
+		post('/org/:id', fetchOrg),
 		get('/test', ctx => "Helloo!!")
 	]);
 };

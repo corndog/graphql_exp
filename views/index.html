@@ -6,12 +6,16 @@
 	<body>
 		<h1>GitHub Usage</h1>
 		<div id="main">
-			<form action="/org" method="POST">
+			<form action="/org" method="POST" id="org_form">
 				<p>Organization</p>
-				<input type="text" name="org" required="required">
+				<input type="text" name="org" required="required" id="org_name">
 				<!-- input type="hidden" name="_csrf" value="TODO" -->
 		  		<input type="submit" value="Do It!">
 			</form>
+		</div>
+		<div id="message">
+		</div>
+		<div id="data_table">
 		</div>
 	<!-- script src="https://cdn.jsdelivr.net/npm/vue/dist/vue.js"></script -->
 	<script src="app.js"></script>
