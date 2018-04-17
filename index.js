@@ -98,8 +98,13 @@ const selectReposForOrg = async org_id => {
 const selectRepoCount = async org_id => {
 	let query = 'SELECT COUNT(*) AS rcount FROM repos WHERE org_id = ?';
 	let row = await db.get(query, [org_id]);
-	console.log(JSON.stringify(row));
 	return row ? {count: row.rcount} : {};
+};
+
+const selectContributorCount = async org_id => {
+	let query = 'SELECT COUNT(*) AS ccount FROM (SELECT DISTINCT rc.user_id FROM repos AS r JOIN repo_contributors AS rc ON r.id = rc.repo_id WHERE r.org_id = ?)';
+	let row = await db.get(query, [org_id]);
+	return row ? {count: row.ccount} : {};
 };
 
 const insertUsers = async users => {
@@ -144,13 +149,11 @@ const getPublicMembersForOrg = async (org_id, publicMembersUrl) => {
 		return getPublicMembersForOrg(org_id, link.next.url);
 	}
 	else {
-		console.log("finished loading members for " + publicMembersUrl);
 		return;
 	}
 };
 
 const getRepoContributors = async (repo_id, contributors_url) => {
-	//console.log("REPO ID: " + repo_id + ", CONTRIBUTOR URL " + contributors_url);
 	let [link, contributors] = await getPaginatedData(contributors_url);
 	let _1 = await insertUsers(contributors.map(rc=> {return {id: rc.id, login: rc.login}}));
 	let _2 = await insertRepoContributors(repo_id, contributors.map(rc => {return {user_id: rc.id, contributions: rc.contributions}}));
@@ -158,20 +161,18 @@ const getRepoContributors = async (repo_id, contributors_url) => {
 		return getRepoContributors(repo_id, link.next.url);
 	}
 	else {
-		console.log("finished loading contibutors for repo " + contributors_url);
 		return;
 	}
 };
 
 const getReposContribs = async contribs => {
 	let next = contribs.shift();
-	//console.log("next repo contrib: " + next);
 	let _1 = await getRepoContributors(next.id, next.url);
 	if (contribs.length > 0) {
 		return getReposContribs(contribs);
 	}
 	else {
-		console.log("finished loading contributors for a bunch of repos");
+		//console.log("finished loading contributors for a bunch of repos");
 		return;
 	}
 };
@@ -185,7 +186,8 @@ const getReposForOrg = async (org_id, orgReposUrl) => {
 		return getReposForOrg(org_id, link.next.url);
 	}
 	else {
-		console.log("finished loading repos for " + orgReposUrl);
+		//console.log("finished loading repos for " + orgReposUrl);
+		return;
 	}
 };
 
@@ -235,7 +237,8 @@ const showOrg = async ctx => {
 	else if (! scrapeStatuses.get(org_name)) {
 		let org = await selectOrgByName(org_name);
 		let repoCount = await selectRepoCount(org.id);
-		return json({'message': `loaded data for ${repoCount.count} repos`, 'done': false});
+		let contribCount = await selectContributorCount(org.id);
+		return json({'message': `loaded data for ${repoCount.count} repos and ${contribCount.count} contributors`, 'done': false});
 	}
 	else { // should have the data
 		let org = await selectOrgByName(org_name); // could tighten this up to one query

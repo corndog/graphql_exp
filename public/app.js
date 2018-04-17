@@ -1,5 +1,3 @@
-// hacked together somewhat hurriedly  :)
-let org_id; // active org id
 let repos = []; // list of things to display
 let internal_contributors = [];
 let active_data = 'repos'; // default
@@ -45,7 +43,6 @@ const showData = (sortField) => {
 };
 
 const getData = async () => {
-	console.log("fetch sdata for " + org_name);
 	let resp = await fetch(`/org/${org_name}`); // might take a while
 	if (resp.status == 404) {
 		setMessage('NOT FOUND');
@@ -81,13 +78,12 @@ const onSubmit = async event => {
 	event.preventDefault();
 	let el = document.getElementById('org_name');
 	org_name = el.value;
-	getData(); // return/await???
+	getData(); 
 };
 
 // click the ths for sorting
 const clickHeader = async event => {
 	let clickedEl = event.target;
-	//console.log(clickedEl.tagName);
 	if (clickedEl.tagName == "TH") {
 		let field = clickedEl.innerText;
 		showData(field); // toggle back and forth ???
@@ -97,7 +93,6 @@ const clickHeader = async event => {
 // click a radio button
 const toggleTable = (event) => {
 	let selectedData = document.querySelector('input[name="view_type"]:checked').value;
-	console.log("SELELCTED " + selectedData);
 	active_data = selectedData;
 	showData('name'); 
 };
