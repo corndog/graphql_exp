@@ -22,6 +22,7 @@ const sortDataBy = field => {
 };
 
 const showData = sortField => {
+	document.getElementById('message').innerText = '';
 	sortDataBy(sortField);
 	let keys = Object.keys(data[0]);
 	let tds = row => keys.map(k => `<td>${row[k]}</td>`).join('')
@@ -33,9 +34,10 @@ const showData = sortField => {
 };
 
 const waitForData = async () => {
-	console.log('wait for data');
+	//console.log('wait for data');
 	let resp = await fetch(`/org/${org_id}`, {'method' : 'POST'}); // might take a while
 	let jsd = await resp.json();
+	data = jsd;
 	showData('name');
 };
 
@@ -45,19 +47,18 @@ const waitForData = async () => {
 
 // form submission
 const onSubmit = async event => {
-	console.log('submit form');
+	clear();
 	event.preventDefault();
 	let el = document.getElementById('org_name');
 	let org_name = el.value;
 	let resp = await fetch(`/org/${org_name}`);
 	let jsd = await resp.json();
 	if (jsd.message == undefined) { // should be good to go
-		// sort it??
 		data = jsd;
 		showData('name');
 	}
 	else if (jsd.message) {
-		console.log("got intial data for " + jsd.org_id);
+		//console.log("got intial data for " + jsd.org_id);
 		document.getElementById('message').innerText = jsd.message;
 		org_id = jsd.org_id;
 		waitForData();
@@ -67,7 +68,7 @@ const onSubmit = async event => {
 // click the ths for sorting
 const clickHeader = async event => {
 	let clickedEl = event.target;
-	console.log(clickedEl.tagName);
+	//console.log(clickedEl.tagName);
 	if (clickedEl.tagName == "TH") {
 		let field = clickedEl.innerText;
 		showData(field); // toggle back and forth ???

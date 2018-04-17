@@ -8,7 +8,7 @@ const {render, json, redirect, status} = server.reply;
 const rootUrl = 'https://api.github.com';
 const opts = {
 	'headers': {
-		'Authorization': 'bearer xyz',
+		'Authorization': 'bearer xx',
 		'content-type': 'application/json'
 	}
 };
@@ -45,12 +45,12 @@ const insertRepoContributors = async (repo_id, contributors) => {
 
 const insertOrg = async (id, login) => {
 	let stmt = await db.prepare('INSERT INTO orgs (id, login) VALUES (?, ?)');
-	return stmt.run(id, login);
+	return stmt.run(id, login.toLowerCase());
 };
 
 const selectOrgByName = async name => {
 	let query = `SELECT id, login FROM orgs WHERE login = ?`;
-	let row = await db.get(query, [name]);
+	let row = await db.get(query, [name.toLowerCase()]);
 	return row ? {id: row.id, login: row.login} : {};
 };
 
@@ -92,6 +92,7 @@ const selectUsers = async () => {
 const getPaginatedData = async url => {
 	let resp = await fetch(url, opts);
 	let data = await resp.json();
+	console.log("data: " + data);
 	let link = parseLink(resp.headers.get('Link')); // can be null, no link in header
 	//console.log("url" + url);
 	//console.log("data? " + data);
@@ -171,6 +172,7 @@ const fetchOrg = async ctx => {
 	console.log("fetch more data for " + org.id + ", " + org.login)
 	let _1 = await getPublicMembersForOrg(org.id, `${rootUrl}/orgs/${org.login}/public_members`);
 	let _3 = await getReposForOrg(org.id, `${rootUrl}/orgs/${org.login}/repos`);
+	console.log("FINISHED LOADING DATA FOR " + org.login);
 	scrapeStatuses.set(org.login, true);
 	let repos = await selectReposForOrg(org.id);
 	return json(repos);
@@ -180,18 +182,18 @@ const fetchOrg = async ctx => {
 // if not return message and trigger load, then poll the get.
 const showOrg = async ctx => {
 	console.log("Looking for ORG " + ctx.params.name);
-	let org_name = ctx.params.name;
+	let org_name = ctx.params.name.toLowerCase();
 	if (scrapeStatuses.get(org_name) == undefined) {
 		scrapeStatuses.set(org_name, false); // its there but not finished
 		console.log("fetch org " + org_name);
 		let org = await getOrg(org_name); // await getReposForOrg(ctx.data.org));
 		console.log("\ninserting ORG: " + org.id + ", " + org.login);
 		let _1 = await insertOrg(org.id, org.login);
-		return json({'message': 'loading data', org_id: org.id});
+		return json({'message': 'loading data', 'org_id': org.id});
 	}
 	else if (! scrapeStatuses.get(org_name)) {
 		let org = await selectOrgByName(org_name);
-		return json({message: 'loading data', org_id: org.id});
+		return json({'message': 'loading data', 'org_id': org.id});
 	}
 	else { // should have the data
 		let org = await selectOrgByName(org_name); // could tighten this up to one query
