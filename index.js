@@ -8,7 +8,7 @@ const {render, json, redirect, status} = server.reply;
 const rootUrl = 'https://api.github.com';
 const opts = {
 	'headers': {
-		'Authorization': 'bearer ed2569600e3dcf2a5da9c29952b8c269eeac91d3',
+		'Authorization': 'bearer xx',
 		'content-type': 'application/json'
 	}
 };
@@ -42,7 +42,7 @@ const selectInternalContributors = async org_id => {
 			   	 WHERE r.org_id = ?
 			   )	
 	    WHERE id IN (SELECT user_id FROM org_public_members WHERE org_id = ?)
- 		GROUP BY id`
+		GROUP BY id`
 
 	let stmt = await db.prepare(query); 
 	let stmt1 = await stmt.bind(org_id, org_id);
