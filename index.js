@@ -8,7 +8,7 @@ const {render, json, redirect, status} = server.reply;
 const rootUrl = 'https://api.github.com';
 const opts = {
 	'headers': {
-		'Authorization': 'bearer xx',
+		'Authorization': 'bearer ed2569600e3dcf2a5da9c29952b8c269eeac91d3',
 		'content-type': 'application/json'
 	}
 };
@@ -28,17 +28,21 @@ const initDb = () => db.transaction(db => {
 	]);
 });
 
+// just need to toggle the IN / NOT IN for internal vs external contributors
 const selectInternalContributors = async org_id => {
 	let query = `
 		SELECT id, 
-				login, 
-				(SELECT SUM(contributions) 
-				 FROM repo_contributors 
-				 WHERE repo_contributors.user_id = id 
-				 	AND repo_contributors.repo_id IN
-				 	(SELECT repo_id FROM repos WHERE org_id = ?)) as contributions 
-		FROM users 
-		WHERE id IN (SELECT user_id FROM org_public_members WHERE org_id = ?)`
+			   login, 
+			   SUM(contributions) as contributions
+			   FROM (
+			   	 SELECT u.id as id, u.login as login, rc.contributions as contributions
+			   	 FROM users u
+			   	 JOIN repo_contributors rc ON u.id = rc.user_id
+			   	 JOIN repos r ON r.id = rc.repo_id
+			   	 WHERE r.org_id = ?
+			   )	
+	    WHERE id IN (SELECT user_id FROM org_public_members WHERE org_id = ?)
+ 		GROUP BY id`
 
 	let stmt = await db.prepare(query); 
 	let stmt1 = await stmt.bind(org_id, org_id);
@@ -102,7 +106,7 @@ const selectRepoCount = async org_id => {
 };
 
 const selectContributorCount = async org_id => {
-	let query = 'SELECT COUNT(*) AS ccount FROM (SELECT DISTINCT rc.user_id FROM repos AS r JOIN repo_contributors AS rc ON r.id = rc.repo_id WHERE r.org_id = ?)';
+	let query = 'SELECT COUNT(DISTINCT rc.user_id) as ccount FROM repos AS r JOIN repo_contributors AS rc ON r.id = rc.repo_id WHERE r.org_id = ?';
 	let row = await db.get(query, [org_id]);
 	return row ? {count: row.ccount} : {};
 };
@@ -201,17 +205,13 @@ const returnData = async org_id => {
 	return {repos: repos, internalContributors: internalContributors, done: true};
 };
 
-// triggered from browser after initial load of org
+
 const fetchOrg = async org_id => {
-	//let org_id = ctx.params.id; // Lower case??
 	let org = await selectOrgById(org_id); 
-	console.log("fetch more data for " + org.id + ", " + org.login)
 	let _1 = await getPublicMembersForOrg(org.id, `${rootUrl}/orgs/${org.login}/public_members`);
 	let _2 = await getReposForOrg(org.id, `${rootUrl}/orgs/${org.login}/repos`);
 	console.log("FINISHED LOADING DATA FOR " + org.login);
 	scrapeStatuses.set(org.login, true);
-	//let data = await returnData(org.id);
-	//return json(data);
 	return; // 
 };
 
@@ -225,7 +225,7 @@ const showOrg = async ctx => {
 		console.log("fetch org " + org_name);
 		let [statusCode, org] = await getOrg(org_name);
 		if (statusCode < 300 && org != null) {
-			console.log("\ninserting ORG: " + org.id + ", " + org.login); // don't think we need id now
+			//console.log("\ninserting ORG: " + org.id + ", " + org.login); 
 			let _1 = await insertOrg(org.id, org.login);
 			fetchOrg(org.id);
 			return json({'message': 'loading data', 'done': false});
@@ -241,7 +241,7 @@ const showOrg = async ctx => {
 		return json({'message': `loaded data for ${repoCount.count} repos and ${contribCount.count} contributors`, 'done': false});
 	}
 	else { // should have the data
-		let org = await selectOrgByName(org_name); // could tighten this up to one query
+		let org = await selectOrgByName(org_name);
 		let data = await returnData(org.id);
 		return json(data);
 	}
@@ -256,7 +256,7 @@ const run = async () => {
 // finally set up server
 	server({ security: { csrf: false } },[
 		get('/', ctx => render('index.html')),
-		get('/org/:name', showOrg) // just use one endpoint
+		get('/org/:name', showOrg)
 	]);
 };
 

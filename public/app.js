@@ -31,7 +31,7 @@ const setMessage = msg => {
 const showData = (sortField) => {
 	let data = active_data == 'repos' ? repos : internal_contributors;
 	setMessage('');
-	document.getElementById('radio_buttons').style.display = ''; // FIX THIS MESSY LOGIC!!!
+	document.getElementById('radio_buttons').style.display = '';
 	sortDataBy(data, sortField);
 	let keys = Object.keys(data[0]);
 	let tds = row => keys.map(k => `<td>${row[k]}</td>`).join('')
@@ -56,7 +56,7 @@ const getData = async () => {
 		}
 		else if (jsd.message) {
 			setMessage(jsd.message);
-			setTimeout(getData, 2000)
+			setTimeout(getData, 2000);
 		}
 		else {
 			console.log("OOPS");
@@ -75,6 +75,7 @@ const getData = async () => {
 // form submission
 const onSubmit = async event => {
 	clear();
+	//active_data = 'repos';  TODO reset radio button to repos
 	event.preventDefault();
 	let el = document.getElementById('org_name');
 	org_name = el.value;
