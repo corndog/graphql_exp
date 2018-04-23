@@ -29,7 +29,8 @@ const initDb = () => db.transaction(db => {
 });
 
 // just need to toggle the IN / NOT IN for internal vs external contributors
-const selectInternalContributors = async org_id => {
+const selectOrgContributors = async (org_id, internal) => {
+	let inCond = internal ? ' IN ' : ' NOT IN '
 	let query = `
 		SELECT id, 
 			   login, 
@@ -41,7 +42,7 @@ const selectInternalContributors = async org_id => {
 			   	 JOIN repos r ON r.id = rc.repo_id
 			   	 WHERE r.org_id = ?
 			   )	
-	    WHERE id IN (SELECT user_id FROM org_public_members WHERE org_id = ?)
+	    WHERE id ${inCond} (SELECT user_id FROM org_public_members WHERE org_id = ?)
 		GROUP BY id`
 
 	let stmt = await db.prepare(query); 
@@ -201,8 +202,9 @@ const scrapeStatuses = new Map();
 
 const returnData = async org_id => {
 	let repos = await selectReposForOrg(org_id);
-	let internalContributors = await selectInternalContributors(org_id);
-	return {repos: repos, internalContributors: internalContributors, done: true};
+	let internalContributors = await selectOrgContributors(org_id, true);
+	let externalContributors = await selectOrgContributors(org_id, false); // might be a lot
+	return {repos: repos, internalContributors: internalContributors, externalContributors: externalContributors, done: true};
 };
 
 
