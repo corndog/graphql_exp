@@ -197,7 +197,7 @@ const getReposForOrg = async (org_id, orgReposUrl) => {
 };
 
 // quick hack, should be in DB
-// {org : {scraping: true, completed: false, max_repos: 200, max_members: 100}}  eg.
+// {org : {completed: false, error, max_repos: 200, max_members: 100}}  eg.
 const scrapeStatuses = new Map();
 
 const returnData = async org_id => {
@@ -209,21 +209,27 @@ const returnData = async org_id => {
 
 
 const fetchOrg = async org_id => {
-	let org = await selectOrgById(org_id); 
-	let _1 = await getPublicMembersForOrg(org.id, `${rootUrl}/orgs/${org.login}/public_members`);
-	let _2 = await getReposForOrg(org.id, `${rootUrl}/orgs/${org.login}/repos`);
-	console.log("FINISHED LOADING DATA FOR " + org.login);
-	scrapeStatuses.set(org.login, true);
+	let org;
+	try {
+		org = await selectOrgById(org_id); 
+		let _1 = await getPublicMembersForOrg(org.id, `${rootUrl}/orgs/${org.login}/public_members`);
+		let _2 = await getReposForOrg(org.id, `${rootUrl}/orgs/${org.login}/repos`);
+		console.log("FINISHED LOADING DATA FOR " + org.login);
+		scrapeStatuses.set(org.login, {completed: true});
+	} catch(error) {
+		console.log("Error fetching org: " + error);
+		scrapeStatuses.set(org.login, {error: error});
+	}
 	return; // 
 };
 
 // first we look for data, if it exists, return it
 // if not return message and trigger load, then poll the get.
 const showOrg = async ctx => {
-	console.log("Looking for ORG " + ctx.params.name);
 	let org_name = ctx.params.name.toLowerCase();
-	if (scrapeStatuses.get(org_name) == undefined) {
-		scrapeStatuses.set(org_name, false); // its there but not finished
+	let org_status = scrapeStatuses.get(org_name);
+	if (org_status == undefined) {
+		scrapeStatuses.set(org_name, {completed: false}); // its there but not finished
 		console.log("fetch org " + org_name);
 		let [statusCode, org] = await getOrg(org_name);
 		if (statusCode < 300 && org != null) {
@@ -236,7 +242,10 @@ const showOrg = async ctx => {
 			return status(statusCode);
 		}
 	}
-	else if (! scrapeStatuses.get(org_name)) {
+	else if (org_status.error) {
+		return status(500).json({error: org_status.error});
+	}
+	else if (! org_status.completed) {
 		let org = await selectOrgByName(org_name);
 		let repoCount = await selectRepoCount(org.id);
 		let contribCount = await selectContributorCount(org.id);

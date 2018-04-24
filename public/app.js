@@ -79,6 +79,11 @@ const getData = async () => {
 	if (resp.status == 404) {
 		setMessage('NOT FOUND');
 	}
+	else if (! resp.ok) {
+		let jsd = await resp.json();
+		let err = jsd.error ? jsd.error : "unexpected server error";
+		setMessage(err.message);
+	}
 	else if (resp.ok){
 		let jsd = await resp.json();
 		if (jsd.done) {
